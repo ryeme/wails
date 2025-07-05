@@ -1,12 +1,12 @@
 package application
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"runtime"
 	"strings"
 	"sync"
+	"text/template"
 
 	"github.com/leaanthony/u"
 
@@ -288,40 +288,27 @@ func (w *WebviewWindow) addCancellationFunction(canceller func()) {
 	w.cancellers = append(w.cancellers, canceller)
 }
 
-// formatJS ensures the 'data' provided marshals to valid json or panics
-func (w *WebviewWindow) formatJS(f string, callID string, data string) string {
-	j, err := json.Marshal(data)
-	if err != nil {
-		panic(err)
-	}
-	return fmt.Sprintf(f, callID, j)
-}
-
-func (w *WebviewWindow) CallError(callID string, result string) {
+func (w *WebviewWindow) CallError(callID string, result string, isJSON bool) {
 	if w.impl != nil {
-		w.impl.execJS(w.formatJS("_wails.callErrorHandler('%s', %s);", callID, result))
+		w.impl.execJS(fmt.Sprintf("_wails.callErrorHandler('%s', '%s', %t);", callID, template.JSEscapeString(result), isJSON))
 	}
 }
 
 func (w *WebviewWindow) CallResponse(callID string, result string) {
 	if w.impl != nil {
-		w.impl.execJS(w.formatJS("_wails.callResultHandler('%s', %s, true);", callID, result))
+		w.impl.execJS(fmt.Sprintf("_wails.callResultHandler('%s', '%s', true);", callID, template.JSEscapeString(result)))
 	}
 }
 
 func (w *WebviewWindow) DialogError(dialogID string, result string) {
 	if w.impl != nil {
-		w.impl.execJS(w.formatJS("_wails.dialogErrorCallback('%s', %s);", dialogID, result))
+		w.impl.execJS(fmt.Sprintf("_wails.dialogErrorCallback('%s', '%s');", dialogID, template.JSEscapeString(result)))
 	}
 }
 
 func (w *WebviewWindow) DialogResponse(dialogID string, result string, isJSON bool) {
 	if w.impl != nil {
-		if isJSON {
-			w.impl.execJS(w.formatJS("_wails.dialogResultCallback('%s', %s, true);", dialogID, result))
-		} else {
-			w.impl.execJS(fmt.Sprintf("_wails.dialogResultCallback('%s', '%s', false);", dialogID, result))
-		}
+		w.impl.execJS(fmt.Sprintf("_wails.dialogResultCallback('%s', '%s', %t);", dialogID, template.JSEscapeString(result), isJSON))
 	}
 }
 
@@ -687,7 +674,7 @@ func (w *WebviewWindow) HandleMessage(message string) {
 			InvokeSync(func() {
 				err := w.startDrag()
 				if err != nil {
-					w.Error("Failed to start drag: %s", err)
+					w.Error("failed to start drag: %w", err)
 				}
 			})
 		}
@@ -695,12 +682,12 @@ func (w *WebviewWindow) HandleMessage(message string) {
 		if !w.IsFullscreen() {
 			sl := strings.Split(message, ":")
 			if len(sl) != 3 {
-				w.Error("Unknown message returned from dispatcher", "message", message)
+				w.Error("unknown message returned from dispatcher: %s", message)
 				return
 			}
 			err := w.startResize(sl[2])
 			if err != nil {
-				w.Error(err.Error())
+				w.Error("%w", err)
 			}
 		}
 	case message == "wails:runtime:ready":
@@ -711,7 +698,7 @@ func (w *WebviewWindow) HandleMessage(message string) {
 			w.ExecJS(js)
 		}
 	default:
-		w.Error("Unknown message sent via 'invoke' on frontend: %v", message)
+		w.Error("unknown message sent via 'invoke' on frontend: %v", message)
 	}
 }
 
@@ -736,20 +723,21 @@ func (w *WebviewWindow) Center() {
 // OnWindowEvent registers a callback for the given window event
 func (w *WebviewWindow) OnWindowEvent(eventType events.WindowEventType, callback func(event *WindowEvent)) func() {
 	eventID := uint(eventType)
-	w.eventListenersLock.Lock()
-	defer w.eventListenersLock.Unlock()
 	windowEventListener := &WindowEventListener{
 		callback: callback,
 	}
+	w.eventListenersLock.Lock()
 	w.eventListeners[eventID] = append(w.eventListeners[eventID], windowEventListener)
+	w.eventListenersLock.Unlock()
 	if w.impl != nil {
 		w.impl.on(eventID)
 	}
 
 	return func() {
+		// Check if eventListener is already locked
 		w.eventListenersLock.Lock()
-		defer w.eventListenersLock.Unlock()
 		w.eventListeners[eventID] = lo.Without(w.eventListeners[eventID], windowEventListener)
+		w.eventListenersLock.Unlock()
 	}
 }
 
@@ -771,9 +759,6 @@ func (w *WebviewWindow) RegisterHook(eventType events.WindowEventType, callback 
 }
 
 func (w *WebviewWindow) HandleWindowEvent(id uint) {
-	w.eventListenersLock.RLock()
-	defer w.eventListenersLock.RUnlock()
-
 	// Get hooks
 	w.eventHooksLock.RLock()
 	hooks := w.eventHooks[id]
@@ -1309,42 +1294,49 @@ func (w *WebviewWindow) SetIgnoreMouseEvents(ignore bool) Window {
 
 func (w *WebviewWindow) cut() {
 	if w.impl == nil || w.isDestroyed() {
-		w.impl.cut()
+		return
 	}
+	w.impl.cut()
 }
 
 func (w *WebviewWindow) copy() {
 	if w.impl == nil || w.isDestroyed() {
-		w.impl.copy()
+		return
 	}
+	w.impl.copy()
 }
 
 func (w *WebviewWindow) paste() {
 	if w.impl == nil || w.isDestroyed() {
-		w.impl.paste()
+		return
 	}
+	w.impl.paste()
 }
 
 func (w *WebviewWindow) selectAll() {
 	if w.impl == nil || w.isDestroyed() {
-		w.impl.selectAll()
+		return
 	}
+	w.impl.selectAll()
 }
 
 func (w *WebviewWindow) undo() {
 	if w.impl == nil || w.isDestroyed() {
-		w.impl.undo()
+		return
 	}
+	w.impl.undo()
 }
 
 func (w *WebviewWindow) delete() {
 	if w.impl == nil || w.isDestroyed() {
-		w.impl.delete()
+		return
 	}
+	w.impl.delete()
 }
 
 func (w *WebviewWindow) redo() {
 	if w.impl == nil || w.isDestroyed() {
-		w.impl.redo()
+		return
 	}
+	w.impl.redo()
 }
