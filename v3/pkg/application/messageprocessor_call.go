@@ -18,7 +18,7 @@ const (
 func (m *MessageProcessor) callErrorCallback(window Window, message string, callID *string, err error) {
 	errorMsg := fmt.Sprintf(message, err)
 	m.Error(errorMsg)
-	window.CallError(*callID, errorMsg)
+	window.CallError(*callID, errorMsg, false)
 }
 
 func (m *MessageProcessor) callCallback(window Window, callID *string, result string, isJSON bool) {
